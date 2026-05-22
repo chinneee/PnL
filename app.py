@@ -409,30 +409,38 @@ with tab2:
 
         st.markdown("")
 
-        # Format display: apply format_val per row
-        display_df = daily_df.copy()
-        for idx, row in display_df.iterrows():
-            key = row["Metric"]
-            for col in date_cols:
-                raw_val = row[col]
-                display_df.at[idx, col] = format_val(key, raw_val)
+        # Build display_df as pure string dtype (object) to avoid float assignment error
+        disp_rows = []
+        style_map = {}  # (row_idx, col) -> css string
 
-        # Build styler with per-cell coloring
+        for idx, row in daily_df.iterrows():
+            key = row["Metric"]
+            new_row = {"Metric": key}
+            for col in date_cols:
+                raw_val = float(row[col]) if row[col] != "" else 0.0
+                new_row[col] = format_val(key, raw_val)
+                # pre-compute cell style
+                cls = row_color(key, raw_val)
+                if cls == "pos":
+                    style_map[(idx, col)] = "background-color:#16a34a22; color:#4ade80"
+                elif cls == "neg":
+                    style_map[(idx, col)] = "background-color:#dc262622; color:#f87171"
+                else:
+                    style_map[(idx, col)] = ""
+            disp_rows.append(new_row)
+
+        # All columns are object dtype — no type conflict
+        display_df = pd.DataFrame(disp_rows).reset_index(drop=True)
+        date_cols_reset = [str(d) for d in dates]  # re-confirm after reset
+
         def style_daily(df_style):
-            # We need raw values from daily_df for color logic
             styles = pd.DataFrame("", index=df_style.index, columns=df_style.columns)
-            for idx, row in daily_df.iterrows():
-                key = row["Metric"]
-                for col in date_cols:
-                    raw_val = row[col]
-                    cls = row_color(key, raw_val)
-                    if cls == "pos":
-                        styles.at[idx, col] = "background-color:#16a34a22; color:#4ade80"
-                    elif cls == "neg":
-                        styles.at[idx, col] = "background-color:#dc262622; color:#f87171"
+            for i in df_style.index:
+                orig_idx = i  # index matches after reset_index
+                for col in date_cols_reset:
+                    styles.at[i, col] = style_map.get((orig_idx, col), "")
             return styles
 
-        # Metric column: bold
         def style_metric_col(df_style):
             styles = pd.DataFrame("", index=df_style.index, columns=df_style.columns)
             styles["Metric"] = "font-weight:600; color:#94a3b8"
