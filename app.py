@@ -382,7 +382,7 @@ with tab1:
 
     st.dataframe(
         summary_df.style.apply(highlight_summary, axis=1),
-        use_container_width=True,
+        width="stretch",
         height=480,
         hide_index=True,
     )
@@ -458,7 +458,7 @@ with tab2:
 
         st.dataframe(
             styled,
-            use_container_width=True,
+            width="stretch",
             height=tbl_height,
             hide_index=True,
         )
@@ -479,7 +479,7 @@ with tab2:
                     "Worst day":      format_val(key, daily_df.set_index("Metric").loc[key, date_cols].astype(float).min()) if key not in PCT_ROWS else "—",
                 })
 
-            st.dataframe(pd.DataFrame(compare_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(compare_rows), width="stretch", hide_index=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — BY ASIN
@@ -519,25 +519,29 @@ with tab3:
 
         asin_df = pd.DataFrame(asin_records).sort_values("_net", ascending=False)
 
+        display_cols = ["ASIN","Product","Sales","Units","Gross Profit","Net Profit",
+                        "Margin","Ads Cost","Real ACOS","Amazon Fees","COGS","Est. Payout","Refunds"]
+        asin_display = asin_df[display_cols].reset_index(drop=True)
+        net_vals    = asin_df["_net"].reset_index(drop=True)
+        margin_vals = asin_df["_margin"].reset_index(drop=True)
+
         def highlight_asin(row):
             styles = []
-            for col in asin_df.columns:
+            for col in row.index:
                 if col == "Net Profit":
-                    v = asin_df.loc[row.name, "_net"]
+                    v = net_vals[row.name]
                     styles.append("background-color:#16a34a22; color:#4ade80" if v > 0 else "background-color:#dc262622; color:#f87171")
                 elif col == "Margin":
-                    v = asin_df.loc[row.name, "_margin"]
+                    v = margin_vals[row.name]
                     styles.append("background-color:#16a34a22; color:#4ade80" if v > 0 else "background-color:#dc262622; color:#f87171")
                 else:
                     styles.append("")
             return styles
 
-        display_cols = ["ASIN","Product","Sales","Units","Gross Profit","Net Profit",
-                        "Margin","Ads Cost","Real ACOS","Amazon Fees","COGS","Est. Payout","Refunds"]
         st.dataframe(
-            asin_df[display_cols].style.apply(highlight_asin, axis=1),
-            use_container_width=True,
-            height=min(60 + len(asin_df) * 36, 600),
+            asin_display.style.apply(highlight_asin, axis=1),
+            width="stretch",
+            height=min(60 + len(asin_display) * 36, 600),
             hide_index=True,
         )
 
