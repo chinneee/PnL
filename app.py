@@ -247,28 +247,39 @@ P_AND_L_ORDER = [
 ]
 
 # ─── BUILD DAILY P&L TABLE ───────────────────────────────────────────────────
-def build_daily_table(df):
-    """Returns a wide DataFrame: rows = metrics, columns = dates"""
+def build_daily_table(df, start_dt=None, end_dt=None):
+    """Returns a wide DataFrame: rows = metrics, columns = ALL dates in range.
+    Days with no data show 0. Columns are sorted oldest→newest."""
     if "_date_only" not in df.columns:
-        return pd.DataFrame()
+        return pd.DataFrame(), []
 
-    dates = sorted(df["_date_only"].unique())
+    # Build full date range from start_dt to end_dt (fill gaps with 0)
+    if start_dt and end_dt:
+        all_dates = [
+            start_dt + timedelta(days=i)
+            for i in range((end_dt - start_dt).days + 1)
+        ]
+    else:
+        all_dates = sorted(df["_date_only"].unique())
+
+    # Build P&L per day that has actual data
     records = {}
-
-    for d in dates:
+    for d in df["_date_only"].unique():
         day_df = df[df["_date_only"] == d]
-        p = build_pnl(day_df)
-        records[d] = p
+        records[d] = build_pnl(day_df)
 
-    # Build: metric × date
+    # Empty P&L for days with no data
+    empty_pnl = {key: 0 for key in P_AND_L_ORDER}
+
+    # Build: metric × date (all dates in range)
     rows = []
     for key in P_AND_L_ORDER:
         row = {"Metric": key}
-        for d in dates:
-            row[str(d)] = records[d].get(key, 0)
+        for d in all_dates:
+            row[str(d)] = records.get(d, empty_pnl).get(key, 0)
         rows.append(row)
 
-    return pd.DataFrame(rows), dates
+    return pd.DataFrame(rows), all_dates
 
 def style_daily_cell(val, key):
     """Return background color string for a daily cell value"""
@@ -300,7 +311,36 @@ if err:
     st.info("💡 Kiểm tra lại:\n1. `SHEET_URL` và `SHEET_NAME` trong `app.py`\n2. Credentials trong Streamlit secrets\n3. Sheet đã share cho service account chưa")
     st.stop()
 
-df_raw["_date"] = pd.to_datetime(df_raw["Date"], errors="coerce", dayfirst=True)
+def parse_dates_flexible(series):
+    """Try multiple date formats to handle YYYY/MM/DD, DD/MM/YYYY, MM/DD/YYYY etc."""
+    formats = [
+        "%Y-%m-%d", "%Y/%m/%d",
+        "%d/%m/%Y", "%d-%m-%Y",
+        "%m/%d/%Y", "%m-%d-%Y",
+        "%d/%m/%Y %H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y/%m/%d %H:%M:%S",
+    ]
+    result = pd.Series([pd.NaT] * len(series), index=series.index)
+    remaining = series.copy().astype(str).str.strip()
+
+    for fmt in formats:
+        mask = result.isna() & (remaining != "nan") & (remaining != "")
+        if not mask.any():
+            break
+        parsed = pd.to_datetime(remaining[mask], format=fmt, errors="coerce")
+        filled = parsed.notna()
+        result[mask] = result[mask].where(~filled, parsed[filled])
+
+    # Final fallback: pandas auto-inference
+    still_na = result.isna() & (remaining != "nan") & (remaining != "")
+    if still_na.any():
+        fallback = pd.to_datetime(remaining[still_na], infer_datetime_format=True, errors="coerce")
+        result[still_na] = result[still_na].where(fallback.isna(), fallback)
+
+    return result
+
+df_raw["_date"] = parse_dates_flexible(df_raw["Date"])
 df_raw = df_raw.dropna(subset=["_date"])
 df_raw["_date_only"] = df_raw["_date"].dt.date
 
@@ -393,7 +433,26 @@ with tab1:
 with tab2:
     st.markdown("<div class='section-title'>Daily P&L Breakdown</div>", unsafe_allow_html=True)
 
-    daily_df, dates = build_daily_table(df)
+    # ── DEBUG: show date parse info ──────────────────────────────────────────
+    with st.expander("🔍 Debug: Kiểm tra date parsing", expanded=False):
+        total_raw = len(df_raw)
+        raw_sample = df_raw["Date"].astype(str).head(5).tolist()
+        parsed_count = len(df_raw)
+        unique_dates_all = sorted(df_raw["_date_only"].unique())
+        unique_dates_filtered = sorted(df["_date_only"].unique())
+
+        st.markdown(f"""
+| | |
+|---|---|
+| **Raw rows (sau parse)** | {parsed_raw_count if False else len(df_raw)} |
+| **Sample Date values** | `{'`, `'.join(raw_sample)}` |
+| **Unique dates trong toàn bộ data** | {len(unique_dates_all)} ngày |
+| **Unique dates sau filter** | {len(unique_dates_filtered)} ngày |
+| **Dates sau filter** | {', '.join(str(d) for d in unique_dates_filtered[:30])} |
+""")
+    # ── END DEBUG ────────────────────────────────────────────────────────────
+
+    daily_df, dates = build_daily_table(df, start_dt, end_dt)
 
     if daily_df.empty:
         st.info("Không có dữ liệu theo ngày.")
